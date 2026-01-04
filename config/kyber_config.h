@@ -22,6 +22,8 @@ const unsigned int maxLedsPerStrip = 115; //109+6
 
 // Habilitamos I2C para NFC.
 #define ENABLE_I2C
+// Tiempo en segundos que va a estar activa la lectura del NFC tras iniciar la placa o apagar el filo (0 = ilimitado)
+#define NFC_TIMEOUT 60
 
 // Activamos el cristal cuando se active el filo.
 //#define CRYSTAL_EDGE_ACTIVATION
