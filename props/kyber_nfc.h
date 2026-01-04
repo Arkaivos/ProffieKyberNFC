@@ -16,6 +16,7 @@ private:
   static constexpr const char* DEFAULT_PRESET_NAME = "default";
   Adafruit_PN532* nfc;
   bool nfcInitialized;
+  bool nfcActive;
   
   uint8_t lastUID[7];
   uint8_t lastUIDLength;
@@ -23,6 +24,7 @@ private:
   bool tagCurrentlyPresent;
   char nfcPresetName[32];
   uint32_t lastCheckTime;
+  uint32_t nfcActiveStartTime; 
   bool crystalLEDOn = false;       // Indica si el cristal está encendido.
   uint32_t crystalLEDOnTime = 0;   // Momento en que se encendió el cristal.
   bool needsPresetReload = true;   // La primera vez que arranca necesita cargar el preset de la SD.
@@ -116,8 +118,8 @@ private:
   
 public:
   KyberNFC() : PropBase(), lastUIDLength(0), lastCheckTime(0), 
-               nfcInitialized(false), tagCurrentlyPresent(false),
-               crystalStyle_(nullptr), savedCrystalStyle_(nullptr) {
+               nfcInitialized(false), nfcActive(false), tagCurrentlyPresent(false),
+               nfcActiveStartTime(0), crystalStyle_(nullptr), savedCrystalStyle_(nullptr) {
     nfc = new Adafruit_PN532(255, 255);
     nfcColor[0] = 255;
     nfcColor[1] = 255;
@@ -137,6 +139,9 @@ public:
     
     if(!nfcInitialized) {
       initNFC();
+      if(nfcInitialized) {
+        activateNFC();
+      }
     }
 
     // Limpiar estilo del cristal cuando termine
@@ -144,7 +149,16 @@ public:
       deactivateCrystalLED();
     }
 
-    if(!SaberBase::IsOn() && nfcInitialized) {
+    // Verificar timeout del NFC
+    if (nfcActive && NFC_TIMEOUT > 0) {
+      uint32_t elapsed = (millis() - nfcActiveStartTime) / 1000;  // Convertir a segundos
+      if (elapsed >= NFC_TIMEOUT) {
+        STDOUT.println(String("-- NFC timeout reached (") + NFC_TIMEOUT + "s), putting NFC to sleep");
+        deactivateNFC();
+      }
+    }
+
+    if(!SaberBase::IsOn() && nfcInitialized && nfcActive) {
       processNFC();
     }
   }
@@ -190,6 +204,15 @@ public:
 
         Off();
 
+        // Reactivar el timeout del NFC al apagar el filo
+        if (nfcInitialized && !nfcActive) {
+          activateNFC();
+        } else if (nfcInitialized && nfcActive) {
+          // Resetear el timeout si ya está activo
+          nfcActiveStartTime = millis();
+          STDOUT.println("-- NFC timeout reset");
+        }
+
         #ifdef CRYSTAL_EDGE_ACTIVATION
         deactivateCrystalLED();
         #endif
@@ -218,6 +241,33 @@ private:
     
     nfc->SAMConfig();
     nfcInitialized = true;
+  }
+
+  // Activar el NFC
+  void activateNFC() {
+    if (!nfcActive) {
+      STDOUT.println("-- Activating NFC");
+      nfc->SAMConfig();  // Despertar el módulo NFC
+      i2cbus.inited();   // Asegurar que I2C está activo
+      nfcActive = true;
+      nfcActiveStartTime = millis();
+      
+      if (NFC_TIMEOUT > 0) {
+        STDOUT.println(String("-- NFC will sleep after ") + NFC_TIMEOUT + " seconds");
+      } else {
+        STDOUT.println("-- NFC timeout disabled (unlimited)");
+      }
+    }
+  }
+
+  // Desactivar el NFC (modo sleep)
+  void deactivateNFC() {
+    if (nfcActive) {
+      STDOUT.println("-- Deactivating NFC (sleep mode)");
+      
+      nfcActive = false;
+      tagCurrentlyPresent = false;
+    }
   }
   
   void processNFC() {
